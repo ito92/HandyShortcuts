@@ -1,0 +1,19 @@
+{
+  "name": "com.dabois.handyshortcuts",
+  "version": "1.0.0",
+  "displayName": "Handy Shortcuts",
+  "unity": "2020.1",
+  "description": "Save all your favorite assets in one place",
+  "keywords": [
+    "Utilities"
+  ],
+  "author": {
+    "name": "Miguel Torres",
+    "email": "mix0204@gmail.com",
+    "url": ""
+  },
+  "type": "library",
+  "samples": [
+   
+ ]
+}
