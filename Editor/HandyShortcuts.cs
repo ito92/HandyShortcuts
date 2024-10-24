@@ -211,7 +211,9 @@ namespace DaBois.Utilities
                 {
                     if(HandyShortcuts.Instance.Shortcuts[id].Asset is SceneAsset)
                     {
-                        EditorSceneManager.OpenScene(AssetDatabase.GetAssetPath(HandyShortcuts.Instance.Shortcuts[id].Asset));
+                        if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()){
+                            EditorSceneManager.OpenScene(AssetDatabase.GetAssetPath(HandyShortcuts.Instance.Shortcuts[id].Asset));
+                        }
                     }
                     else
                     {
