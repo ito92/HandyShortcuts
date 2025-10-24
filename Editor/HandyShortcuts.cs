@@ -115,8 +115,6 @@ namespace DaBois.Utilities
             return "Assets/Settings/";
         }
 
-
-
 #if UNITY_EDITOR
         [MenuItem("Handy Shortcuts/Shortcuts")]
         static void Menu()
@@ -151,7 +149,7 @@ namespace DaBois.Utilities
 #endif
     }
 
-    #if UNITY_EDITOR
+#if UNITY_EDITOR
     static class HandyShortcutsRegister
     {
         [SettingsProvider]
@@ -166,12 +164,24 @@ namespace DaBois.Utilities
         private Object asset;
         private Editor assetEditor;
         private Vector2 _scroll;
+        private Editor[] componentEditors = new Editor[0];
 
         public static PopUpAssetInspector Create(Object asset)
         {
             var window = CreateWindow<PopUpAssetInspector>($"{asset.name} | {asset.GetType().Name}");
             window.asset = asset;
             window.assetEditor = Editor.CreateEditor(asset);
+
+            if(asset is GameObject)
+            {
+                Component[] components = ((GameObject)asset).GetComponents<Component>();
+                window.componentEditors = new Editor[components.Length];
+                for (int i = 0; i < components.Length; i++)
+                {
+                    window.componentEditors[i] = Editor.CreateEditor(components[i]);
+                }
+            }
+
             return window;
         }
 
@@ -183,6 +193,12 @@ namespace DaBois.Utilities
 
             _scroll =  EditorGUILayout.BeginScrollView(_scroll, EditorStyles.helpBox);
             assetEditor.OnInspectorGUI();
+
+            foreach(var c in componentEditors)
+            {
+                c.OnInspectorGUI();
+            }
+
             EditorGUILayout.EndScrollView();
         }
     }
