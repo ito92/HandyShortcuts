@@ -4,6 +4,7 @@ using System.IO;
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using System.Linq;
 #endif
 using UnityEngine;
 
@@ -62,7 +63,7 @@ namespace DaBois.Utilities
             // Attempt to load the settings asset.
             var path = GetSettingsPath() + filename + ".asset";
 
-#if UNITY_EDITOR
+            //#if UNITY_EDITOR
             _instance = AssetDatabase.LoadAssetAtPath<HandyShortcuts>(path);
             if (_instance != null)
             {
@@ -97,7 +98,7 @@ namespace DaBois.Utilities
                 return _instance;
             }
             _instance = CreateInstance<HandyShortcuts>();
-#endif
+            //#endif
 
 #if UNITY_EDITOR
             Directory.CreateDirectory(Path.Combine(
@@ -115,13 +116,7 @@ namespace DaBois.Utilities
             return "Assets/Settings/";
         }
 
-#if UNITY_EDITOR
-        [MenuItem("Handy Shortcuts/Shortcuts")]
-        static void Menu()
-        {
-
-            FloatingFieldMenu.Open(new Rect(EditorGUIUtility.GetMainWindowPosition().center, Vector2.one));
-        }
+        //#if UNITY_EDITOR
 
         private static Editor _editor;
 
@@ -146,10 +141,10 @@ namespace DaBois.Utilities
 
             return provider;
         }
-#endif
+        //#endif
     }
 
-#if UNITY_EDITOR
+    //#if UNITY_EDITOR
     static class HandyShortcutsRegister
     {
         [SettingsProvider]
@@ -172,7 +167,7 @@ namespace DaBois.Utilities
             window.asset = asset;
             window.assetEditor = Editor.CreateEditor(asset);
 
-            if(asset is GameObject)
+            if (asset is GameObject)
             {
                 Component[] components = ((GameObject)asset).GetComponents<Component>();
                 window.componentEditors = new Editor[components.Length];
@@ -191,10 +186,10 @@ namespace DaBois.Utilities
             asset = EditorGUILayout.ObjectField("Asset", asset, asset.GetType(), false);
             GUI.enabled = true;
 
-            _scroll =  EditorGUILayout.BeginScrollView(_scroll, EditorStyles.helpBox);
+            _scroll = EditorGUILayout.BeginScrollView(_scroll, EditorStyles.helpBox);
             assetEditor.OnInspectorGUI();
 
-            foreach(var c in componentEditors)
+            foreach (var c in componentEditors)
             {
                 c.OnInspectorGUI();
             }
@@ -203,58 +198,440 @@ namespace DaBois.Utilities
         }
     }
 
-    public class FloatingFieldMenu : PopupWindowContent
+    public class FloatingFieldMenu : EditorWindow
     {
-        private static Rect _position;
-
-        public static void Open(Rect position)
+        private class MenuNode
         {
-            _position = position;
-            PopupWindow.Show(_position, new FloatingFieldMenu());
+            public string Name;
+            public string FullPath;
+            public HandyShortcuts.ShortcutData Shortcut;
+            public Dictionary<string, MenuNode> Children = new Dictionary<string, MenuNode>();
+
+            public bool IsLeaf => Shortcut != null;
         }
 
-        public override void OnGUI(Rect rect)
+        private class MenuEntry
         {
-            EditorGUI.BeginChangeCheck();
-            float labelWidth = EditorGUIUtility.labelWidth;
-            EditorGUIUtility.labelWidth = 0;
+            public string Label;
+            public bool IsBack;
+            public bool IsFolder;
+            public MenuNode Node;
+        }
 
-            GenericMenu menu = new GenericMenu();
-            for (int i = 0; i < HandyShortcuts.Instance.Shortcuts.Length; i++)
+        private static MenuNode root;
+
+        private readonly Stack<MenuNode> navigation = new Stack<MenuNode>();
+
+        private string search = "";
+        private Vector2 scroll;
+        private int selectedIndex;
+
+        private List<MenuEntry> visibleEntries = new List<MenuEntry>();
+
+        private bool focusSearchNextFrame;
+
+        [MenuItem("Handy Shortcuts/Shortcuts %#k")]
+        static void Open()
+        {
+            var window = GetWindow<FloatingFieldMenu>(true, "Handy Shortcuts");
+
+            float width = 650;
+            float height = 450;
+
+            Rect main = EditorGUIUtility.GetMainWindowPosition();
+
+
+            BuildTree();
+
+            window.navigation.Clear();
+            window.navigation.Push(root);
+
+            window.RefreshVisibleEntries();
+
+            window.ShowAsDropDown(new Rect(main.center,Vector2.zero), new Vector2(width,height));
+            window.Focus();
+        }
+
+        static void BuildTree()
+        {
+            root = new MenuNode()
             {
-                int id = i;
-                menu.AddItem(new GUIContent(HandyShortcuts.Instance.Shortcuts[id].Path), false, () =>
+                Name = "Root",
+                FullPath = ""
+            };
+
+            foreach (var shortcut in HandyShortcuts.Instance.Shortcuts)
+            {
+                if (shortcut.Asset == null || string.IsNullOrWhiteSpace(shortcut.Path))
                 {
-                    if(HandyShortcuts.Instance.Shortcuts[id].Asset is SceneAsset)
+                    continue;
+                }
+
+                string[] split = shortcut.Path.Split('/');
+
+                MenuNode current = root;
+                string currentPath = "";
+
+                for (int i = 0; i < split.Length; i++)
+                {
+                    string part = split[i];
+
+                    currentPath = string.IsNullOrEmpty(currentPath)
+                        ? part
+                        : currentPath + "/" + part;
+
+                    if (!current.Children.TryGetValue(part, out MenuNode child))
                     {
-                        if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()){
-                            EditorSceneManager.OpenScene(AssetDatabase.GetAssetPath(HandyShortcuts.Instance.Shortcuts[id].Asset));
-                        }
+                        child = new MenuNode()
+                        {
+                            Name = part,
+                            FullPath = currentPath
+                        };
+
+                        current.Children.Add(part, child);
                     }
-                    else
+
+                    current = child;
+                }
+
+                current.Shortcut = shortcut;
+            }
+        }
+
+        void RefreshVisibleEntries()
+        {
+            visibleEntries.Clear();
+
+            bool searching = !string.IsNullOrWhiteSpace(search);
+
+            if (searching)
+            {
+                string lower = search.ToLower();
+
+                List<MenuNode> allLeafs = new List<MenuNode>();
+
+                CollectLeafs(root, allLeafs);
+
+                foreach (var node in allLeafs
+                    .Where(x =>
+                        x.Shortcut.Path.ToLower().Contains(lower) ||
+                        x.Shortcut.Asset.name.ToLower().Contains(lower))
+                    .OrderBy(x => x.Shortcut.Path))
+                {
+                    visibleEntries.Add(new MenuEntry()
                     {
-                        PopUpAssetInspector.Create(HandyShortcuts.Instance.Shortcuts[id].Asset);
-                    }
-                });
+                        Label = node.Name,
+                        IsFolder = false,
+                        Node = node
+                    });
+                }
+            }
+            else
+            {
+                MenuNode current = navigation.Peek();
+
+                if (navigation.Count > 1)
+                {
+                    visibleEntries.Add(new MenuEntry()
+                    {
+                        Label = "← Back",
+                        IsBack = true
+                    });
+                }
+
+                IEnumerable<MenuNode> nodes = current.Children.Values;
+
+                foreach (var node in nodes
+                    .OrderBy(x => x.IsLeaf)
+                    .ThenBy(x => x.Name))
+                {
+                    visibleEntries.Add(new MenuEntry()
+                    {
+                        Label = node.Name,
+                        IsFolder = !node.IsLeaf,
+                        Node = node
+                    });
+                }
             }
 
-            menu.ShowAsContext();
-
-            EditorGUIUtility.labelWidth = labelWidth;
-
-            editorWindow.Close();
+            selectedIndex = Mathf.Clamp(selectedIndex, 0, Mathf.Max(visibleEntries.Count - 1, 0));
         }
 
-        public override void OnClose()
+        void CollectLeafs(MenuNode node, List<MenuNode> result)
         {
-            base.OnClose();
+            if (node.IsLeaf)
+            {
+                result.Add(node);
+            }
+
+            foreach (var child in node.Children.Values)
+            {
+                CollectLeafs(child, result);
+            }
         }
 
-        public override Vector2 GetWindowSize()
+        private void OnEnable()
         {
-            return _position.size;
+            focusSearchNextFrame = true;
+        }
+
+        private void OnGUI()
+        {
+            if (focusSearchNextFrame && Event.current.type == EventType.Repaint)
+            {
+                focusSearchNextFrame = false;
+
+                EditorGUI.FocusTextInControl("SearchField");
+
+                Repaint();
+            }
+
+            HandleKeyboard();
+
+            GUILayout.Space(15);
+
+            DrawBreadcrumbs();
+
+            GUILayout.Space(10);
+
+            GUI.SetNextControlName("SearchField");
+
+            EditorGUI.BeginChangeCheck();
+
+            search = EditorGUILayout.TextField(search, GUILayout.Height(28));
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                selectedIndex = 0;
+                RefreshVisibleEntries();
+            }
+
+            GUILayout.Space(10);
+
+            scroll = EditorGUILayout.BeginScrollView(scroll);
+
+            for (int i = 0; i < visibleEntries.Count; i++)
+            {
+                DrawEntry(i, visibleEntries[i]);
+            }
+
+            EditorGUILayout.EndScrollView();
+        }
+
+        void DrawBreadcrumbs()
+        {
+            GUILayout.BeginHorizontal(EditorStyles.helpBox);
+
+            string path = string.Join(
+                " / ",
+                navigation.Reverse().Skip(1).Select(x => x.Name)
+            );
+
+            if (string.IsNullOrEmpty(path))
+            {
+                path = "Root";
+            }
+
+            GUILayout.Label(path, EditorStyles.boldLabel);
+
+            GUILayout.FlexibleSpace();
+
+            GUILayout.EndHorizontal();
+        }
+
+        void DrawEntry(int index, MenuEntry entry)
+        {
+            bool selected = index == selectedIndex;
+
+            Rect containerRect = EditorGUILayout.BeginVertical();
+
+            GUILayout.Space(2);
+
+            Rect rowRect = EditorGUILayout.BeginHorizontal(GUILayout.Height(28));
+
+            if (selected)
+            {
+                EditorGUI.DrawRect(
+                    new Rect(
+                        4,
+                        rowRect.y - 1,
+                        position.width - 8,
+                        30
+                    ),
+                    new Color(.25f, .45f, .9f, .25f)
+                );
+            }
+
+            if (entry.IsBack)
+            {
+                GUILayout.Label("↩", GUILayout.Width(22));
+                GUILayout.Label(entry.Label, EditorStyles.boldLabel);
+            }
+            else if (entry.IsFolder)
+            {
+                GUILayout.Label(
+                    EditorGUIUtility.IconContent("Folder Icon").image,
+                    GUILayout.Width(20),
+                    GUILayout.Height(20)
+                );
+
+                GUILayout.Label(entry.Label, EditorStyles.boldLabel);
+
+                GUILayout.FlexibleSpace();
+
+                GUILayout.Label("›", EditorStyles.boldLabel);
+            }
+            else
+            {
+                Texture icon = AssetPreview.GetMiniThumbnail(entry.Node.Shortcut.Asset);
+
+                GUILayout.Label(
+                    icon,
+                    GUILayout.Width(20),
+                    GUILayout.Height(20)
+                );
+
+                GUILayout.BeginVertical();
+
+                GUILayout.Label(
+                    entry.Node.Shortcut.Asset.name,
+                    EditorStyles.boldLabel
+                );
+
+                GUILayout.Label(
+                    entry.Node.Shortcut.Path,
+                    EditorStyles.miniLabel
+                );
+
+                GUILayout.EndVertical();
+            }
+
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(2);
+
+            EditorGUILayout.EndVertical();
+
+            if (Event.current.type == EventType.MouseDown &&
+                containerRect.Contains(Event.current.mousePosition))
+            {
+                ActivateEntry(entry);
+            }
+        }
+
+        void HandleKeyboard()
+        {
+            Event e = Event.current;
+
+            if (e.type != EventType.KeyDown)
+            {
+                return;
+            }
+
+            switch (e.keyCode)
+            {
+                case KeyCode.DownArrow:
+                    selectedIndex++;
+                    selectedIndex = Mathf.Min(selectedIndex, visibleEntries.Count - 1);
+                    e.Use();
+                    Repaint();
+                    break;
+
+                case KeyCode.UpArrow:
+                    selectedIndex--;
+                    selectedIndex = Mathf.Max(selectedIndex, 0);
+                    e.Use();
+                    Repaint();
+                    break;
+
+                case KeyCode.Return:
+
+                    if (visibleEntries.Count > 0)
+                    {
+                        ActivateEntry(visibleEntries[selectedIndex]);
+                    }
+
+                    e.Use();
+                    break;
+
+                case KeyCode.LeftArrow:
+
+                    if (navigation.Count > 1)
+                    {
+                        navigation.Pop();
+                        selectedIndex = 0;
+                        RefreshVisibleEntries();
+                    }
+
+                    e.Use();
+                    break;
+
+                case KeyCode.RightArrow:
+
+                    if (visibleEntries.Count > 0)
+                    {
+                        var entry = visibleEntries[selectedIndex];
+
+                        if (entry.IsFolder)
+                        {
+                            navigation.Push(entry.Node);
+                            selectedIndex = 0;
+                            search = "";
+                            RefreshVisibleEntries();
+                        }
+                    }
+
+                    e.Use();
+                    break;
+
+                case KeyCode.Escape:
+                    Close();
+                    e.Use();
+                    break;
+            }
+        }
+
+        void ActivateEntry(MenuEntry entry)
+        {
+            if (entry.IsBack)
+            {
+                navigation.Pop();
+                selectedIndex = 0;
+                search = "";
+                RefreshVisibleEntries();
+                return;
+            }
+
+            if (entry.IsFolder)
+            {
+                navigation.Push(entry.Node);
+                selectedIndex = 0;
+                search = "";
+                RefreshVisibleEntries();
+                return;
+            }
+
+            OpenShortcut(entry.Node.Shortcut);
+        }
+
+        static void OpenShortcut(HandyShortcuts.ShortcutData shortcut)
+        {
+            if (shortcut.Asset is SceneAsset)
+            {
+                if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                {
+                    EditorSceneManager.OpenScene(
+                        AssetDatabase.GetAssetPath(shortcut.Asset)
+                    );
+                }
+            }
+            else
+            {
+                PopUpAssetInspector.Create(shortcut.Asset);
+            }
+
+            GetWindow<FloatingFieldMenu>().Close();
         }
     }
-
-#endif
+    //#endif
 }
