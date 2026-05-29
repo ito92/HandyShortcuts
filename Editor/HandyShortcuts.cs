@@ -63,7 +63,7 @@ namespace DaBois.Utilities
             // Attempt to load the settings asset.
             var path = GetSettingsPath() + filename + ".asset";
 
-            //#if UNITY_EDITOR
+            #if UNITY_EDITOR
             _instance = AssetDatabase.LoadAssetAtPath<HandyShortcuts>(path);
             if (_instance != null)
             {
@@ -98,7 +98,7 @@ namespace DaBois.Utilities
                 return _instance;
             }
             _instance = CreateInstance<HandyShortcuts>();
-            //#endif
+            #endif
 
 #if UNITY_EDITOR
             Directory.CreateDirectory(Path.Combine(
@@ -116,7 +116,7 @@ namespace DaBois.Utilities
             return "Assets/Settings/";
         }
 
-        //#if UNITY_EDITOR
+        #if UNITY_EDITOR
 
         private static Editor _editor;
 
@@ -141,10 +141,10 @@ namespace DaBois.Utilities
 
             return provider;
         }
-        //#endif
+        #endif
     }
 
-    //#if UNITY_EDITOR
+    #if UNITY_EDITOR
     static class HandyShortcutsRegister
     {
         [SettingsProvider]
@@ -633,5 +633,5 @@ namespace DaBois.Utilities
             GetWindow<FloatingFieldMenu>().Close();
         }
     }
-    //#endif
+    #endif
 }
