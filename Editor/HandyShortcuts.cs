@@ -93,6 +93,7 @@ namespace DaBois.Utilities
                     Debug.LogWarning($"Failed to move previous settings asset " + $"'{oldPath}' to '{path}'. " + $"A new settings asset will be created.", _instance);
                 }
             }
+
             if (_instance != null)
             {
                 return _instance;
